@@ -1,0 +1,1417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WE工作表 · 打卡、OT & Claiming</title>
+    <!-- 确保 html2canvas 与 jsPDF 加载完成后再执行导出逻辑 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+            onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+            onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            /* 浅米褐底色，衬托主容器 */
+            background: #f5ebe0;
+            background-image: radial-gradient(#f4acb7 1.2px, transparent 1.2px);
+            background-size: 24px 24px;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            display: flex; justify-content: center; align-items: flex-start;
+            min-height: 100vh; padding: 1.5rem 1rem;
+        }
+        .app-container {
+            /* 暖白底 + 柔和粉边框，与背景浅褐形成层次 */
+            max-width: 1000px; width: 100%; background: #fffafb;
+            border-radius: 36px;
+            box-shadow: 0 20px 40px -12px rgba(139, 94, 75, 0.18), 0 0 0 4px #f9cad5;
+            padding: 2rem 1.8rem; position: relative; overflow: hidden;
+        }
+        .app-container::before { content: "🌸"; position: absolute; top: 12px; right: 24px; font-size: 1.8rem; opacity: 0.7; transform: rotate(15deg); }
+        .app-container::after { content: "🧸"; position: absolute; top: 18px; left: 24px; font-size: 1.4rem; opacity: 0.65; }
+
+        /* 标题：深玫瑰棕，搭配浅褐副标题 */
+        h1 { font-size: 2rem; font-weight: 800; color: #7a3e48; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap; position: relative; padding-left: 1.8rem; }
+        h1 span { background: #f3e5d8; font-size: 0.8rem; font-weight: 600; color: #7c5848; padding: 0.2rem 0.9rem; border-radius: 40px; border: 2px dashed #d5bdaf; }
+
+        /* 副标题（浅褐色系）与 规则提示（浅粉色系）穿插 */
+        .subhead { color: #6d4c3d; font-size: 0.9rem; margin-bottom: 0.9rem; border-left: 4px solid #c89f86; padding: 0.5rem 0.9rem; background: #f6ede4; border-radius: 0 12px 12px 0; }
+        .rule-note { background: #ffe5ec; border: 2px dashed #f497b6; border-radius: 16px; padding: 0.65rem 1rem; font-size: 0.82rem; color: #7a3e48; margin-bottom: 1.4rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+
+        /* 导航标签：浅褐底槽 + 粉色激活态 */
+        .view-tabs { display: flex; gap: 0.5rem; background: #efe3d6; border: 1.5px solid #e3d0be; border-radius: 60px; padding: 0.32rem; margin-bottom: 1.6rem; max-width: 520px; flex-wrap: wrap; }
+        .view-tab { flex: 1; padding: 0.7rem 1.1rem; border-radius: 60px; border: none; background: transparent; font-size: 0.95rem; font-weight: 700; color: #6d4c3d; cursor: pointer; transition: all 0.15s; }
+        .view-tab.active { background: #e56b8b; color: #ffffff; box-shadow: 0 4px 12px rgba(229, 107, 139, 0.28); }
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* 今日打卡四个按钮：粉色 ↔ 浅褐色 交替穿插，绝不相邻同色 */
+        .checkin-grid { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-bottom: 1.5rem; }
+        .checkin-btn { flex: 1 1 130px; border-radius: 60px; padding: 0.9rem 1rem; font-size: 0.95rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 0.4rem; cursor: pointer; transition: all 0.15s ease; }
+        /* 1. 上班：主粉色 */
+        .checkin-btn.clock-in { background: #e56b8b; border: 2px solid #e56b8b; color: #ffffff; box-shadow: 0 3px 0 #b84a68; }
+        /* 2. 下班：暖浅褐（奶茶色） */
+        .checkin-btn.clock-out { background: #f3e4d7; border: 2px solid #d5b8a3; color: #6d4c3d; box-shadow: 0 3px 0 #c3a189; }
+        /* 3. Off Day：柔粉（樱花粉） */
+        .checkin-btn.offday { background: #ffccd5; border: 2px solid #f497b6; color: #7a3e48; box-shadow: 0 3px 0 #e07a9b; }
+        /* 4. 补记录：焦糖浅褐 */
+        .checkin-btn.manual { background: #c89f86; border: 2px solid #b58970; color: #ffffff; box-shadow: 0 3px 0 #8d654e; }
+        .checkin-btn:active { transform: translateY(2px); }
+
+        /* 今日状态栏：浅褐底 + 粉色标签穿插 */
+        .today-status { background: #f7ede2; border: 2px solid #e3ccb8; border-radius: 20px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+        .today-status .label { font-weight: 800; color: #6d4c3d; }
+        .today-status .times { display: flex; flex-wrap: wrap; gap: 0.8rem; font-size: 0.9rem; }
+        .today-status .times span { background: #fffafb; padding: 0.32rem 1rem; border-radius: 40px; border: 1.5px solid #f4acb7; color: #7a3e48; font-weight: 600; }
+        .today-status .times .highlight { background: #ffe5ec; border-color: #e56b8b; color: #9d2f4e; font-weight: 800; }
+
+        /* 统计卡片容器：浅粉底，内部 3 张小卡片按 粉 -> 浅褐 -> 粉 穿插 */
+        .monthly-stats { display: flex; gap: 0.9rem; flex-wrap: wrap; background: #fff0f4; border-radius: 24px; padding: 1.1rem 1.3rem; margin-bottom: 1.8rem; border: 2px solid #f9cad5; }
+        .stat-item { flex: 1 1 140px; border-radius: 18px; padding: 0.9rem 1.1rem; }
+        .stat-item:nth-child(odd) { background: #ffe0e9; border: 1.5px solid #f497b6; }
+        .stat-item:nth-child(even) { background: #f5ebe0; border: 1.5px solid #d5bdaf; }
+        .stat-item:nth-child(odd) .stat-label { color: #b84a68; }
+        .stat-item:nth-child(odd) .stat-value { color: #7a3e48; }
+        .stat-item:nth-child(even) .stat-label { color: #8d654e; }
+        .stat-item:nth-child(even) .stat-value { color: #5c3d2e; }
+        .stat-label { font-size: 0.74rem; text-transform: uppercase; font-weight: 700; margin-bottom: 0.25rem; }
+        .stat-value { font-size: 1.45rem; font-weight: 800; }
+        .stat-unit { font-size: 0.8rem; font-weight: 600; opacity: 0.85; }
+
+        /* 日历 */
+        .calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        .calendar-header h2 { font-size: 1.2rem; font-weight: 800; color: #7a3e48; }
+        .calendar-nav { display: flex; align-items: center; gap: 0.5rem; }
+        .cal-nav-btn { background: #f6ede4; border: 2px solid #d5bdaf; border-radius: 40px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1.1rem; color: #6d4c3d; box-shadow: 0 2px 0 #d5bdaf; }
+        .cal-month-label { font-weight: 800; color: #7a3e48; font-size: 0.95rem; min-width: 110px; text-align: center; background: #ffe5ec; padding: 0.3rem 0.8rem; border-radius: 20px; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: 28px repeat(6, 54px); grid-auto-rows: 54px; align-items: stretch; gap: 5px; background: #f6ede4; border-radius: 20px; padding: 10px; border: 2px solid #e3ccb8; margin-bottom: 1.2rem; }
+        .cal-weekday { text-align: center; font-size: 0.72rem; font-weight: 800; color: #6d4c3d; min-height: 28px; display: flex; align-items: center; justify-content: center; }
+        .cal-day { height: 54px; min-height: 54px; max-height: 54px; overflow: hidden; background: #fffafb; border-radius: 12px; border: 1.5px solid #f9cad5; padding: 0.2rem 0.15rem; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; }
+        .cal-day:hover { border-color: #e56b8b; background: #ffe5ec; transform: scale(1.03); }
+        .cal-day.empty { background: transparent; border: 1.5px solid transparent; cursor: default; pointer-events: none; }
+        .cal-day-num { font-size: 0.78rem; font-weight: 700; color: #6d4c3d; }
+        .cal-day.today .cal-day-num { background: #e56b8b; color: white; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 30px; font-size: 0.7rem; }
+        .cal-hours { font-size: 0.58rem; font-weight: 700; color: #b84a68; margin-top: 0.1rem; white-space: nowrap; }
+        .cal-hours.zero { color: #a68a78; font-weight: 600; }
+        .cal-day.offday-bg { background: #efe2d5; border-color: #cbb09a; }
+        .cal-day.offday-bg .cal-day-num { color: #6d4c3d; }
+        .cal-day.has-ot { border-left: 3.5px solid #e56b8b; background: #ffe5ec; }
+
+        /* 记录列表标题与操作栏 */
+        .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+        .section-title h2 { font-size: 1.2rem; font-weight: 800; color: #7a3e48; }
+        .section-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .export-btn { background: #e56b8b; border: none; color: white; font-size: 0.8rem; font-weight: 700; cursor: pointer; padding: 0.55rem 1.2rem; border-radius: 30px; box-shadow: 0 3px 0 #b84a68; }
+        .yellow-btn { background: #c89f86 !important; color: #fff !important; box-shadow: 0 3px 0 #8d654e !important; }
+        .clear-btn { background: #f6ede4; border: 2px solid #d5bdaf; font-size: 0.8rem; color: #6d4c3d; cursor: pointer; padding: 0.4rem 1rem; border-radius: 30px; font-weight: 700; }
+        .clear-btn:hover { background: #fee2e2; border-color: #fecaca; color: #b91c1c; }
+
+        .record-tools { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; margin: 0 0 .95rem; background: #f7ede2; padding: 0.85rem 1rem; border-radius: 20px; border: 1.5px solid #e3ccb8; }
+        .record-tools select, .claim-form input, .claim-form textarea { border: 1.5px solid #e3ccb8; border-radius: 12px; padding: .65rem .8rem; background: #fffafb; color: #5c3d2e; font: inherit; min-width: 0; }
+        .record-tools select { flex: 1 1 160px; }
+        .small-action, .claim-actions button { border: 1.5px solid #f4acb7; border-radius: 20px; padding: .42rem .85rem; background: #ffe5ec; color: #7a3e48; font-weight: 700; cursor: pointer; }
+        .export-hint { font-size: .78rem; color: #6d4c3d; width: 100%; font-weight: 600; }
+
+        /* 记录列表：月份标题用浅褐，条目按 暖白 ↔ 柔粉 隔行穿插 */
+        .log-list { background: #fffafb; border-radius: 24px; border: 2px solid #f4acb7; overflow: hidden; box-shadow: 0 4px 12px rgba(139, 94, 75, 0.08); }
+        .empty-log { padding: 2.2rem 1rem; text-align: center; color: #a68a78; font-size: 0.95rem; }
+        .record-month-heading { background: #efe3d6; color: #6d4c3d; padding: .68rem 1.2rem; font-weight: 800; border-bottom: 1.5px solid #dcc5b2; }
+        .log-entry { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 1.3rem; border-bottom: 1px solid #f5e6dc; gap: .65rem; }
+        .log-entry:nth-of-type(even) { background: #fff2f6; }
+        .log-entry:nth-of-type(odd) { background: #fcf7f2; }
+        .log-entry:last-child { border-bottom: none; }
+        .record-check { width: 18px; height: 18px; accent-color: #e56b8b; }
+        .entry-left { display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
+        .entry-date { font-weight: 800; color: #6d4c3d; min-width: 90px; font-size: 0.95rem; }
+        .entry-type { font-size: 0.72rem; font-weight: 700; padding: 0.22rem 0.8rem; border-radius: 40px; }
+        .type-work { background: #ffd6e0; color: #9d2f4e; }
+        .type-off { background: #e8d5c4; color: #5c3d2e; }
+        .entry-times { font-size: 0.85rem; color: #5c3d2e; display: flex; gap: 0.55rem; flex-wrap: wrap; }
+        .entry-times span { background: #ffffff; padding: 0.18rem 0.72rem; border-radius: 30px; border: 1px solid #e6d2c3; }
+        .entry-ot { font-weight: 800; color: #b84a68 !important; background: #ffe5ec !important; border-color: #f497b6 !important; }
+        .entry-actions { display: flex; align-items: center; gap: 0.3rem; }
+        .edit-entry, .delete-entry { background: transparent; border: none; font-size: 1.1rem; color: #b08d79; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 30px; }
+        .edit-entry:hover { color: #b84a68; background: #ffe5ec; }
+        .delete-entry:hover { color: #b91c1c; background: #fee2e2; }
+
+        /* Claiming 区域：粉与浅褐交替 */
+        .claim-total { color: #7a3e48; font-weight: 800; background: #ffe5ec; padding: 0.3rem 0.9rem; border-radius: 20px; border: 1.5px solid #f497b6; }
+        .claim-form { background: #fff0f4; border: 2px solid #f9cad5; border-radius: 22px; padding: 1.15rem; margin-bottom: 1.3rem; }
+        .claim-form .form-group { margin-bottom: .85rem; }
+        .claim-form label { display: block; color: #6d4c3d; font-weight: 700; font-size: .85rem; margin-bottom: .35rem; }
+        .claim-form input, .claim-form textarea { width: 100%; border-color: #e3ccb8; background: #fffcf9; }
+        .claim-form textarea { min-height: 76px; resize: vertical; }
+        .claim-form input[type=file] { background: #f7ede2; }
+        .claim-preview { display: none; max-width: 180px; max-height: 180px; width: auto; height: auto; object-fit: contain; background: #fff; border-radius: 12px; border: 2px solid #f4acb7; margin-top: .5rem; }
+        .claim-entry { display: flex; gap: .8rem; align-items: flex-start; padding: 1rem; border-bottom: 1px solid #eedad0; }
+        .claim-entry:nth-of-type(even) { background: #fff2f6; }
+        .claim-entry:nth-of-type(odd) { background: #fcf7f2; }
+        .claim-entry:last-child { border-bottom: 0; }
+        .claim-thumb { width: 84px; height: 84px; border-radius: 12px; object-fit: contain; background: #fff; border: 1.5px solid #e3ccb8; flex-shrink: 0; }
+        .claim-meta { flex: 1; min-width: 0; color: #5c3d2e; }
+        .claim-meta strong { display: block; margin-bottom: .25rem; color: #7a3e48; }
+        .claim-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+        .claim-status-bar { display: flex; align-items: center; gap: .5rem; margin-top: .45rem; flex-wrap: wrap; }
+        .claimed-toggle-label { display: inline-flex; align-items: center; gap: .35rem; padding: .28rem .75rem; border-radius: 20px; font-size: .8rem; font-weight: 700; cursor: pointer; border: 1.5px solid #f497b6; background: #ffe5ec; color: #9d2f4e; transition: all .15s; user-select: none; }
+        .claimed-toggle-label input { width: 15px; height: 15px; accent-color: #16a34a; cursor: pointer; }
+        .claimed-toggle-label.is-claimed { background: #dcfce7; border-color: #86efac; color: #15803d; }
+        .claim-entry.is-claimed { background: #f2fbf4; }
+        .claim-entry.is-claimed .claim-meta strong { color: #15803d; }
+        .claim-summary-badges { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+        .claim-badge { padding: .25rem .75rem; border-radius: 20px; font-size: .82rem; font-weight: 700; }
+        .claim-badge.claimed { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .claim-badge.unclaimed { background: #f3e4d7; color: #6d4c3d; border: 1px solid #d5b8a3; }
+
+        /* 弹窗 */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(92, 61, 46, 0.35); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1100; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
+        .modal-overlay.active { opacity: 1; visibility: visible; }
+        .modal-box { background: #fffafb; border-radius: 32px; max-width: 500px; width: calc(100% - 2rem); padding: 2rem 1.8rem; box-shadow: 0 30px 60px -20px rgba(122, 62, 72, 0.35), 0 0 0 4px #f9cad5; }
+        .modal-box h2 { font-size: 1.4rem; font-weight: 800; color: #7a3e48; margin-bottom: 0.5rem; }
+        .modal-desc { color: #8d654e; font-size: 0.85rem; margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1.2rem; }
+        .form-group label { display: block; font-size: 0.85rem; font-weight: 700; color: #6d4c3d; margin-bottom: 0.4rem; }
+        .form-group input { width: 100%; padding: 0.8rem 1rem; border: 2px solid #e3ccb8; border-radius: 14px; font-size: 1rem; color: #5c3d2e; background: #fcf7f2; }
+        .form-row { display: flex; gap: 1rem; }
+        .form-row .form-group { flex: 1; }
+        .offday-check { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.5rem; padding: 0.8rem 1rem; background: #ffe5ec; border-radius: 14px; border: 2px solid #f4acb7; cursor: pointer; color: #7a3e48; font-weight: 600; }
+        .offday-check input { width: 1.1rem; height: 1.1rem; accent-color: #e56b8b; }
+        .modal-actions-split { display: flex; gap: 0.8rem; justify-content: space-between; margin-top: 1.5rem; flex-wrap: wrap; }
+        .modal-actions-split .right-group { display: flex; gap: 0.8rem; margin-left: auto; }
+        .modal-btn { padding: 0.8rem 1.8rem; border-radius: 60px; font-size: 0.95rem; font-weight: 700; cursor: pointer; border: none; }
+        .modal-btn.cancel { background: #f6ede4; color: #6d4c3d; border: 2px solid #d5bdaf; }
+        .modal-btn.save { background: #e56b8b; color: white; box-shadow: 0 4px 0 #b84a68; }
+        .modal-btn.danger { background: #fee2e2; color: #b91c1c; border: 2px solid #fecaca; }
+
+        /* 自定义确认框 */
+        .app-confirm-overlay { position: fixed; inset: 0; z-index: 5000; background: rgba(92, 61, 46, .4); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+        .app-confirm-box { width: min(420px, 100%); background: #fffafb; border: 2px solid #f4acb7; border-radius: 22px; padding: 1.4rem; box-shadow: 0 20px 60px rgba(122, 62, 72, .25); }
+        .app-confirm-message { color: #6d4c3d; font-weight: 700; line-height: 1.6; white-space: pre-line; margin-bottom: 1.2rem; }
+        .app-confirm-actions { display: flex; justify-content: flex-end; gap: .65rem; }
+        .app-confirm-actions button { border-radius: 30px; padding: .65rem 1.2rem; font-weight: 700; cursor: pointer; border: 1.5px solid #d5bdaf; }
+        .app-confirm-cancel { background: #f6ede4; color: #6d4c3d; }
+        .app-confirm-ok { background: #e56b8b; color: white; border-color: #e56b8b !important; }
+
+        .toast-message { background: #7a3e48; color: #fffafb; padding: 0.85rem 1.6rem; border-radius: 60px; font-size: 0.95rem; font-weight: 700; position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 1200; max-width: calc(100vw - 2rem); text-align: center; box-shadow: 0 10px 25px rgba(92, 61, 46, 0.35); border: 2px solid #f4acb7; }
+        .toast-message.show { opacity: 1; }
+        footer { margin-top: 1.5rem; font-size: 0.75rem; color: #a68a78; text-align: center; }
+        #exportContainer { position: fixed; left: -9999px; top: 0; z-index: 99999; width: max-content; pointer-events: none; }
+
+        @media (max-width:600px) {
+            .app-container { padding: 1.5rem 1rem; }
+            .form-row { flex-direction: column; gap: 0; }
+            .view-tabs { max-width: 100%; }
+            .view-tab { flex: 1 1 28%; padding: .65rem .45rem; font-size: .82rem; }
+            .calendar-grid { grid-template-rows: 26px repeat(6, 46px); grid-auto-rows: 46px; gap: 3px; padding: 6px; }
+            .cal-day { height: 46px; min-height: 46px; max-height: 46px; border-radius: 8px; padding: 1px; }
+            .cal-hours { font-size: .48rem; }
+            .log-entry { padding: .75rem .65rem; }
+            .entry-date { min-width: 64px; font-size: .8rem; }
+            .claim-entry { padding: .7rem; }
+            .modal-actions-split { flex-direction: column; }
+            .modal-actions-split .right-group { width: 100%; justify-content: flex-end; }
+        }
+        @media print {
+            body { background: #fff !important; padding: 0 !important; display: block !important; }
+            .app-container { box-shadow: none !important; border: 0 !important; max-width: none !important; padding: 0 !important; }
+            .view-tabs, .checkin-grid, .section-actions, .record-tools, .entry-actions, .claim-form, .claim-actions, footer, .calendar-nav button, .export-btn, .clear-btn { display: none !important; }
+            .page { display: block !important; }
+            .log-list, .monthly-stats, .calendar-grid { break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <h1>🌸 WE工作表</h1>
+        <div class="subhead">日视图打卡，月视图查看整月OT（显示为 小时+分钟）</div>
+        <div class="rule-note">⚙️ 计算规则：10:00–19:00 共 <strong>9 小时</strong>，扣除中间休息 <strong>1 小时</strong>，标准工作 <strong>8 小时</strong>；超出部分计为 OT。<strong>凌晨下班自动归到前一天计算 OT。</strong></div>
+
+        <div class="view-tabs">
+            <button class="view-tab active" data-page="dayPage">📅 打卡记录</button>
+            <button class="view-tab" data-page="monthPage">🗓️ 整月OT</button>
+            <button class="view-tab" data-page="claimPage">🧾 Claiming</button>
+        </div>
+
+        <!-- 天页面 -->
+        <div class="page active" id="dayPage">
+            <div class="checkin-grid">
+                <button type="button" class="checkin-btn clock-in" id="clockInBtn">🌅 上班</button>
+                <button class="checkin-btn clock-out" id="clockOutBtn">🌙 下班</button>
+                <button class="checkin-btn offday" id="offdayBtn">🏖️ Off Day</button>
+                <button class="checkin-btn manual" id="manualRecordBtn">📝 补记录</button>
+            </div>
+
+            <div class="today-status">
+                <div class="label">📅 今日 <span id="todayDateDisplay"></span></div>
+                <div class="times">
+                    <span>上班: <strong id="todayClockIn">—</strong></span>
+                    <span>下班: <strong id="todayClockOut">—</strong></span>
+                    <span class="highlight">OT: <strong id="todayOT">0分钟</strong></span>
+                </div>
+            </div>
+
+            <div class="monthly-stats">
+                <div class="stat-item">
+                    <div class="stat-label">本月总 OT</div>
+                    <div class="stat-value" id="monthlyTotalOT">0小时0分钟</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">工作日天数</div>
+                    <div class="stat-value" id="workDaysCount">0 <span class="stat-unit">天</span></div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Off Day</div>
+                    <div class="stat-value" id="offDaysCount">0 <span class="stat-unit">天</span></div>
+                </div>
+            </div>
+
+            <div class="section-title">
+                <h2>📋 打卡记录</h2>
+                <div class="section-actions">
+                    <button type="button" class="clear-btn" id="clearAllBtn">清空全部</button>
+                </div>
+            </div>
+            <div class="record-tools">
+                <select id="recordMonthFilter" aria-label="按月份筛选"><option value="all">所有月份</option></select>
+                <button type="button" class="small-action" id="selectAllRecordsBtn">选择当前列表全部</button>
+                <button type="button" class="small-action" id="clearSelectedRecordsBtn">取消选择</button>
+                <span class="export-hint">勾选要导出的记录，或直接导出全部记录：</span>
+                <button type="button" class="export-btn yellow-btn" id="exportSelectedImageBtn">导出选中照片</button>
+                <button type="button" class="export-btn yellow-btn" id="exportSelectedPdfBtn">导出选中PDF</button>
+                <button type="button" class="export-btn" id="exportAllImageBtn">导出全部照片</button>
+                <button type="button" class="export-btn" id="exportAllPdfBtn">导出全部PDF</button>
+            </div>
+
+            <div class="log-list" id="logListContainer">
+                <div class="empty-log">还没有任何记录，点击上方按钮开始打卡吧 🌸</div>
+            </div>
+        </div>
+
+        <!-- 月页面 -->
+        <div class="page" id="monthPage">
+            <div class="calendar-header">
+                <h2>📅 整月OT</h2>
+                <div class="calendar-nav">
+                    <button class="cal-nav-btn" id="calPrevBtn">‹</button>
+                    <span class="cal-month-label" id="calMonthLabel">2025年1月</span>
+                    <button class="cal-nav-btn" id="calNextBtn">›</button>
+                </div>
+            </div>
+            <div class="calendar-grid" id="calendarGrid"></div>
+            <div class="monthly-stats" style="margin-bottom: 0;">
+                <div class="stat-item">
+                    <div class="stat-label">本月总 OT</div>
+                    <div class="stat-value" id="monthTotalOT">0小时0分钟</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">工作日</div>
+                    <div class="stat-value" id="monthWorkDays">0 <span class="stat-unit">天</span></div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Off Day</div>
+                    <div class="stat-value" id="monthOffDays">0 <span class="stat-unit">天</span></div>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 1.2rem;">
+                <button type="button" class="export-btn" id="exportMonthBtn" style="background: #e56b8b; box-shadow: 0 3px 0 #b84a68;">📸 导出整月OT图片</button>
+            </div>
+        </div>
+
+        <!-- Claiming 页面 -->
+        <div class="page" id="claimPage">
+            <div class="section-title"><h2>🧾 Claiming 费用记录</h2><span class="claim-total" id="claimTotal">总金额：RM 0.00</span></div>
+            <form class="claim-form" id="claimForm">
+                <div class="form-row">
+                    <div class="form-group"><label for="claimDate">日期</label><input type="date" id="claimDate" required></div>
+                    <div class="form-group"><label for="claimAmount">金额（RM）</label><input type="number" id="claimAmount" min="0" step="0.01" placeholder="例如：25.50" required></div>
+                </div>
+                <div class="form-group"><label for="claimPurpose">目的 / 用途</label><input type="text" id="claimPurpose" placeholder="例如：客户会议、购买活动用品" required></div>
+                <div class="form-group"><label for="claimLocation">地点</label><input type="text" id="claimLocation" placeholder="填写地点或商店名称" required></div>
+                <div class="form-group"><label for="claimPhoto">上传收据 / 照片</label><input type="file" id="claimPhoto" accept="image/*"><img id="claimPreview" class="claim-preview" alt="照片预览"></div>
+                <button type="submit" class="export-btn yellow-btn" id="saveClaimBtn">＋ 保存 Claim</button>
+                <button type="button" class="small-action" id="cancelClaimEditBtn" style="display:none;">取消编辑</button>
+            </form>
+            <div class="section-title">
+                <h2>📂 Claiming Records</h2>
+                <div class="claim-summary-badges">
+                    <span class="export-hint" id="claimMonthTotal" style="width:auto;">当前月份总金额：RM 0.00</span>
+                    <span class="claim-badge claimed" id="claimClaimedTotal">✅ 已Claim：RM 0.00</span>
+                    <span class="claim-badge unclaimed" id="claimUnclaimedTotal">⏳ 未Claim：RM 0.00</span>
+                </div>
+            </div>
+            <div class="record-tools">
+                <select id="claimMonthFilter" aria-label="按月份筛选 Claiming"><option value="all">所有月份</option></select>
+                <select id="claimStatusFilter" aria-label="按Claim状态筛选"><option value="all">全部状态</option><option value="unclaimed">⏳ 未Claim</option><option value="claimed">✅ 已Claim到</option></select>
+                <button type="button" class="small-action" id="selectAllClaimsBtn">选择当前列表全部</button>
+                <button type="button" class="small-action" id="clearSelectedClaimsBtn">取消选择</button>
+                <span class="export-hint">勾选要导出的 Claim，或导出全部月份：</span>
+                <button type="button" class="export-btn yellow-btn" id="exportSelectedClaimsImageBtn">导出选中照片</button>
+                <button type="button" class="export-btn yellow-btn" id="exportSelectedClaimsPdfBtn">导出选中PDF</button>
+                <button type="button" class="export-btn" id="exportAllClaimsImageBtn">导出全部照片</button>
+                <button type="button" class="export-btn" id="exportAllClaimsPdfBtn">导出全部PDF</button>
+            </div>
+            <div class="log-list" id="claimList"><div class="empty-log">还没有 Claiming 记录</div></div>
+        </div>
+
+        <footer>⚡ 数据自动保存在浏览器中 · 刷新不会丢失</footer>
+    </div>
+
+    <!-- 弹窗 -->
+    <div class="modal-overlay" id="manualModal">
+        <div class="modal-box">
+            <h2 id="modalTitle">📝 补记录</h2>
+            <p class="modal-desc" id="modalDesc">选择日期并填写时间，自动计算当天OT</p>
+            <div class="form-group">
+                <label>日期</label>
+                <input type="date" id="manualDate">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>上班时间</label>
+                    <input type="time" id="manualClockIn">
+                </div>
+                <div class="form-group">
+                    <label>下班时间</label>
+                    <input type="time" id="manualClockOut">
+                </div>
+            </div>
+            <div class="offday-check">
+                <input type="checkbox" id="manualOffDay">
+                <label for="manualOffDay">标记为 Off Day（休息日，不计OT）</label>
+            </div>
+            <div class="modal-actions-split">
+                <button type="button" class="modal-btn cancel" id="manualCancelBtn">取消</button>
+                <div class="right-group">
+                    <button type="button" class="modal-btn danger" id="manualDeleteBtn" style="display: none;">删除记录</button>
+                    <button type="button" class="modal-btn save" id="manualSaveBtn">保存记录</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-message" id="toast"></div>
+    <div id="exportContainer"></div>
+
+    <script>
+        (function() {
+            const STORAGE_KEY = 'we_work_records_v5';
+            const CLAIM_STORAGE_KEY = 'emelyn_claim_records_v1';
+            let dailyRecords = [];
+            let claimRecords = [];
+            let editingClaimId = null;
+            let pendingClaimPhoto = '';
+            let recordMonthFilterValue = 'all';
+            let toastTimer = null;
+            let calViewYear = new Date().getFullYear();
+            let calViewMonth = new Date().getMonth();
+            let editingDate = null;
+
+            // DOM 元素引用
+            const tabs = document.querySelectorAll('.view-tab');
+            const dayPage = document.getElementById('dayPage');
+            const monthPage = document.getElementById('monthPage');
+            const claimPage = document.getElementById('claimPage');
+            const clockInBtn = document.getElementById('clockInBtn');
+            const clockOutBtn = document.getElementById('clockOutBtn');
+            const offdayBtn = document.getElementById('offdayBtn');
+            const manualRecordBtn = document.getElementById('manualRecordBtn');
+            const clearAllBtn = document.getElementById('clearAllBtn');
+            const exportMonthBtn = document.getElementById('exportMonthBtn');
+            const recordMonthFilter = document.getElementById('recordMonthFilter');
+            const selectAllRecordsBtn = document.getElementById('selectAllRecordsBtn');
+            const clearSelectedRecordsBtn = document.getElementById('clearSelectedRecordsBtn');
+            const exportSelectedImageBtn = document.getElementById('exportSelectedImageBtn');
+            const exportSelectedPdfBtn = document.getElementById('exportSelectedPdfBtn');
+            const exportAllImageBtn = document.getElementById('exportAllImageBtn');
+            const exportAllPdfBtn = document.getElementById('exportAllPdfBtn');
+            const claimForm = document.getElementById('claimForm');
+            const claimDate = document.getElementById('claimDate');
+            const claimAmount = document.getElementById('claimAmount');
+            const claimPurpose = document.getElementById('claimPurpose');
+            const claimLocation = document.getElementById('claimLocation');
+            const claimPhoto = document.getElementById('claimPhoto');
+            const claimPreview = document.getElementById('claimPreview');
+            const claimList = document.getElementById('claimList');
+            const claimTotal = document.getElementById('claimTotal');
+            const cancelClaimEditBtn = document.getElementById('cancelClaimEditBtn');
+            const claimMonthFilter = document.getElementById('claimMonthFilter');
+            const claimMonthTotal = document.getElementById('claimMonthTotal');
+            const selectAllClaimsBtn = document.getElementById('selectAllClaimsBtn');
+            const clearSelectedClaimsBtn = document.getElementById('clearSelectedClaimsBtn');
+            const exportSelectedClaimsImageBtn = document.getElementById('exportSelectedClaimsImageBtn');
+            const exportSelectedClaimsPdfBtn = document.getElementById('exportSelectedClaimsPdfBtn');
+            const exportAllClaimsImageBtn = document.getElementById('exportAllClaimsImageBtn');
+            const exportAllClaimsPdfBtn = document.getElementById('exportAllClaimsPdfBtn');
+            let claimMonthFilterValue = 'all';
+            let claimStatusFilterValue = 'all';
+            const claimStatusFilter = document.getElementById('claimStatusFilter');
+            const claimClaimedTotal = document.getElementById('claimClaimedTotal');
+            const claimUnclaimedTotal = document.getElementById('claimUnclaimedTotal');
+            const logListContainer = document.getElementById('logListContainer');
+            const todayDateDisplay = document.getElementById('todayDateDisplay');
+            const todayClockIn = document.getElementById('todayClockIn');
+            const todayClockOut = document.getElementById('todayClockOut');
+            const todayOT = document.getElementById('todayOT');
+            const monthlyTotalOT = document.getElementById('monthlyTotalOT');
+            const workDaysCount = document.getElementById('workDaysCount');
+            const offDaysCount = document.getElementById('offDaysCount');
+            const toastEl = document.getElementById('toast');
+
+            const calendarGrid = document.getElementById('calendarGrid');
+            const calMonthLabel = document.getElementById('calMonthLabel');
+            const calPrevBtn = document.getElementById('calPrevBtn');
+            const calNextBtn = document.getElementById('calNextBtn');
+            const monthTotalOT = document.getElementById('monthTotalOT');
+            const monthWorkDays = document.getElementById('monthWorkDays');
+            const monthOffDays = document.getElementById('monthOffDays');
+
+            const manualModal = document.getElementById('manualModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalDesc = document.getElementById('modalDesc');
+            const manualDate = document.getElementById('manualDate');
+            const manualClockIn = document.getElementById('manualClockIn');
+            const manualClockOut = document.getElementById('manualClockOut');
+            const manualOffDay = document.getElementById('manualOffDay');
+            const manualCancelBtn = document.getElementById('manualCancelBtn');
+            const manualSaveBtn = document.getElementById('manualSaveBtn');
+            const manualDeleteBtn = document.getElementById('manualDeleteBtn');
+
+            // ---------- 工具函数 ----------
+            function getTodayDateStr() {
+                const d = new Date();
+                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            }
+            function formatTime(ts) {
+                if (!ts) return '—';
+                const d = new Date(ts);
+                return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            }
+            function formatDateShort(dateStr) {
+                if (!dateStr) return '';
+                const p = dateStr.split('-');
+                return `${p[1]}/${p[2]}`;
+            }
+            function getRecordByDate(dateStr) {
+                return dailyRecords.find(r => r.date === dateStr) || null;
+            }
+            function dateTimeToTimestamp(dateStr, timeStr) {
+                if (!dateStr || !timeStr) return null;
+                return new Date(`${dateStr}T${timeStr}:00`).getTime();
+            }
+            function timestampToTimeStr(ts) {
+                if (!ts) return '';
+                const d = new Date(ts);
+                return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            }
+            function minutesToHuman(totalMinutes) {
+                if (!totalMinutes || totalMinutes <= 0) return '0分钟';
+                totalMinutes = Math.round(totalMinutes);
+                const h = Math.floor(totalMinutes / 60);
+                const m = totalMinutes % 60;
+                if (h === 0) return `${m}分钟`;
+                if (m === 0) return `${h}小时`;
+                return `${h}小时${m}分钟`;
+            }
+            function minutesToCalShort(totalMinutes) {
+                if (!totalMinutes || totalMinutes <= 0) return '0m';
+                totalMinutes = Math.round(totalMinutes);
+                const h = Math.floor(totalMinutes / 60);
+                const m = totalMinutes % 60;
+                if (h === 0) return `${m}m`;
+                if (m === 0) return `${h}h`;
+                return `${h}h${m}m`;
+            }
+
+            // ========== 核心计算：扣除1小时休息，超过8小时算OT ==========
+            const STANDARD_MINUTES = 8 * 60; // 标准工作8小时（480分钟）
+            const REST_MINUTES = 60; // 休息1小时（60分钟）
+
+            function getTotalMinutes(record) {
+                if (!record || !record.clockIn || !record.clockOut) return 0;
+                if (record.offDay) return 0;
+                const inTime = new Date(record.clockIn);
+                let outTime = new Date(record.clockOut);
+                // 如果下班 < 上班，说明是次日凌晨，给下班 +24h
+                if (outTime < inTime) {
+                    outTime = new Date(outTime.getTime() + 24 * 60 * 60 * 1000);
+                }
+                const diff = outTime - inTime;
+                if (diff < 0) return 0;
+                // 总分钟数扣除1小时休息
+                return Math.max(0, Math.round(diff / 60000) - REST_MINUTES);
+            }
+
+            function getOTMinutes(record) {
+                if (!record || !record.clockIn || !record.clockOut) return 0;
+                if (record.offDay) return 0;
+                // 超过8小时（480分钟）的部分算OT
+                return Math.max(0, getTotalMinutes(record) - STANDARD_MINUTES);
+            }
+
+            function getOTDisplay(record) {
+                if (!record || record.offDay) return '0分钟';
+                return minutesToHuman(getOTMinutes(record));
+            }
+
+            // ---------- 存储 ----------
+            function loadFromStorage() {
+                try {
+                    const s = localStorage.getItem(STORAGE_KEY);
+                    if (s) {
+                        const p = JSON.parse(s);
+                        if (Array.isArray(p)) dailyRecords = p;
+                    }
+                } catch (e) { dailyRecords = []; }
+                dailyRecords.sort((a, b) => (a.date < b.date ? 1 : -1));
+            }
+            function saveToStorage() {
+                try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dailyRecords)); }
+                catch (e) { showToast('保存失败', 2000); }
+            }
+            function loadClaims() {
+                try { const raw = localStorage.getItem(CLAIM_STORAGE_KEY); claimRecords = raw ? JSON.parse(raw) : []; if (!Array.isArray(claimRecords)) claimRecords = []; }
+                catch (e) { claimRecords = []; }
+            }
+            function saveClaims() {
+                try { localStorage.setItem(CLAIM_STORAGE_KEY, JSON.stringify(claimRecords)); }
+                catch (e) { showToast('Claim 保存失败，照片可能太大，请换较小的照片', 2600); }
+            }
+            function monthKey(date) { return (date || '').slice(0,7); }
+            function monthText(key) { const p=key.split('-'); return `${p[0]}年${Number(p[1])}月`; }
+            function renderMonthFilter() {
+                const previous = recordMonthFilter.value || recordMonthFilterValue || 'all';
+                const months = [...new Set(dailyRecords.map(r=>monthKey(r.date)).filter(Boolean))].sort().reverse();
+                recordMonthFilter.innerHTML = '<option value="all">所有月份</option>' + months.map(m=>`<option value="${m}">${monthText(m)}</option>`).join('');
+                recordMonthFilter.value = months.includes(previous) || previous === 'all' ? previous : 'all';
+                recordMonthFilterValue = recordMonthFilter.value;
+            }
+
+            function showToast(msg, duration = 1800) {
+                if (toastTimer) clearTimeout(toastTimer);
+                toastEl.textContent = msg;
+                toastEl.classList.add('show');
+                toastTimer = setTimeout(() => toastEl.classList.remove('show'), duration);
+            }
+
+            // 统一图片导出：在 html2canvas 的克隆页面中把导出卡片移入可视区域，
+            // 避免原本放在屏幕外的导出容器被截成空白图。
+            async function downloadElementAsPng(element, filename, successMessage) {
+                if (!element || typeof html2canvas === 'undefined') {
+                    showToast('图片组件尚未加载，请刷新页面后重试', 2500);
+                    return;
+                }
+                try {
+                    const canvas = await html2canvas(element, {
+                        scale: Math.min(3, Math.max(2, window.devicePixelRatio || 2)),
+                        useCORS: true,
+                        allowTaint: false,
+                        backgroundColor: '#fdf2f8',
+                        logging: false,
+                        scrollX: 0,
+                        scrollY: 0,
+                        windowWidth: Math.max(window.innerWidth, element.scrollWidth + 40),
+                        windowHeight: Math.max(window.innerHeight, element.scrollHeight + 40),
+                        onclone: (clonedDocument) => {
+                            const clonedContainer = clonedDocument.getElementById('exportContainer');
+                            if (clonedContainer) {
+                                clonedContainer.style.position = 'fixed';
+                                clonedContainer.style.left = '0';
+                                clonedContainer.style.top = '0';
+                                clonedContainer.style.zIndex = '999999';
+                                clonedContainer.style.width = 'max-content';
+                                clonedContainer.style.opacity = '1';
+                                clonedContainer.style.transform = 'none';
+                            }
+                        }
+                    });
+
+                    const blob = await new Promise((resolve, reject) => {
+                        canvas.toBlob(result => result ? resolve(result) : reject(new Error('PNG生成失败')), 'image/png');
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1500);
+                    showToast(successMessage, 1800);
+                } catch (err) {
+                    console.error('图片导出失败：', err);
+                    showToast('生成图片失败，请允许下载并重试', 2500);
+                } finally {
+                    const container = document.getElementById('exportContainer');
+                    if (container) container.innerHTML = '';
+                }
+            }
+
+            // ---------- 打卡操作 ----------
+            function getOrCreateTodayRecord() {
+                const t = getTodayDateStr();
+                let r = getRecordByDate(t);
+                if (!r) { r = { date: t, clockIn: null, clockOut: null, offDay: false }; dailyRecords.push(r); }
+                return r;
+            }
+            function handleClockIn() {
+                const r = getOrCreateTodayRecord();
+                if (r.offDay) { showToast('今天是 Off Day，无法打卡', 1500); return; }
+                if (r.clockIn) { showToast('今天已打过上班卡', 1200); return; }
+                r.clockIn = Date.now();
+                saveToStorage(); renderAll(); showToast(`打卡成功！今天加油再努力！！ (${formatTime(r.clockIn)})`, 2600);
+            }
+            function handleClockOut() {
+                const r = getOrCreateTodayRecord();
+                if (r.offDay) { showToast('今天是 Off Day，无法打卡', 1500); return; }
+                if (!r.clockIn) { showToast('请先打上班卡', 1500); return; }
+                if (r.clockOut) { showToast('今天已打过下班卡', 1200); return; }
+                r.clockOut = Date.now();
+                saveToStorage(); renderAll(); showToast(`幸苦你了~Wenen 今天也很努力~💖 (${formatTime(r.clockOut)})`, 2600);
+            }
+            function handleOffDay() {
+                const t = getTodayDateStr();
+                let r = getRecordByDate(t);
+                if (!r) { r = { date: t, clockIn: null, clockOut: null, offDay: true }; dailyRecords.push(r); }
+                else {
+                    if (r.offDay) { showToast('今天已是 Off Day', 1200); return; }
+                    r.offDay = true; r.clockIn = null; r.clockOut = null;
+                }
+                saveToStorage(); renderAll(); showToast('休息是为了走更长远的路', 2600);
+            }
+
+            // ---------- 补记录 / 编辑 ----------
+            function openManualModal(editDateStr) {
+                editingDate = editDateStr || null;
+                if (editingDate) {
+                    modalTitle.textContent = '✏️ 编辑记录';
+                    modalDesc.textContent = `修改 ${editingDate} 的打卡信息（凌晨下班自动算前一天）`;
+                    manualDate.value = editingDate;
+                    const e = getRecordByDate(editingDate);
+                    if (e) {
+                        manualOffDay.checked = e.offDay;
+                        manualClockIn.value = e.offDay ? '' : timestampToTimeStr(e.clockIn);
+                        manualClockOut.value = e.offDay ? '' : timestampToTimeStr(e.clockOut);
+                    }
+                    manualDate.disabled = true;
+                    manualDeleteBtn.style.display = 'inline-block';
+                } else {
+                    modalTitle.textContent = '📝 补记录';
+                    modalDesc.textContent = '选择日期并填写时间（凌晨下班自动算前一天OT）';
+                    const t = getTodayDateStr();
+                    manualDate.value = t;
+                    const e = getRecordByDate(t);
+                    if (e && !e.offDay) {
+                        manualClockIn.value = timestampToTimeStr(e.clockIn);
+                        manualClockOut.value = timestampToTimeStr(e.clockOut);
+                    } else {
+                        manualClockIn.value = '';
+                        manualClockOut.value = '';
+                    }
+                    manualOffDay.checked = e ? e.offDay : false;
+                    manualDate.disabled = false;
+                    manualDeleteBtn.style.display = 'none';
+                }
+                const d = manualOffDay.checked;
+                manualClockIn.disabled = d;
+                manualClockOut.disabled = d;
+                manualModal.classList.add('active');
+            }
+            function closeManualModal() {
+                manualModal.classList.remove('active');
+                editingDate = null;
+                manualDate.disabled = false;
+                manualDeleteBtn.style.display = 'none';
+            }
+            function saveManualRecord() {
+                const dateStr = manualDate.value.trim();
+                if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { showToast('请选择正确日期', 1500); return; }
+                const isOff = manualOffDay.checked;
+                let inTs = null, outTs = null;
+                if (!isOff) {
+                    const inStr = manualClockIn.value.trim(), outStr = manualClockOut.value.trim();
+                    if (!inStr || !outStr) { showToast('请填写时间或勾选 Off Day', 1800); return; }
+                    inTs = dateTimeToTimestamp(dateStr, inStr);
+                    outTs = dateTimeToTimestamp(dateStr, outStr);
+                    if (isNaN(inTs) || isNaN(outTs)) { showToast('时间格式错误', 1500); return; }
+                }
+                let r = getRecordByDate(dateStr);
+                if (!r) { r = { date: dateStr, clockIn: null, clockOut: null, offDay: false }; dailyRecords.push(r); }
+                if (isOff) { r.offDay = true; r.clockIn = null; r.clockOut = null; }
+                else { r.offDay = false; r.clockIn = inTs; r.clockOut = outTs; }
+                saveToStorage(); renderAll(); closeManualModal();
+                showToast(`✅ 已保存 ${dateStr}`, 1500);
+            }
+
+
+            // 自定义确认框：不依赖浏览器原生 confirm()，确保清空/删除按钮在本地打开时也能正常使用。
+            function askConfirm(message, confirmText = '确定') {
+                return new Promise(resolve => {
+                    const overlay = document.createElement('div');
+                    overlay.className = 'app-confirm-overlay';
+                    overlay.innerHTML = `
+                        <div class="app-confirm-box" role="dialog" aria-modal="true">
+                            <div class="app-confirm-message"></div>
+                            <div class="app-confirm-actions">
+                                <button type="button" class="app-confirm-cancel">取消</button>
+                                <button type="button" class="app-confirm-ok"></button>
+                            </div>
+                        </div>`;
+                    overlay.querySelector('.app-confirm-message').textContent = message;
+                    overlay.querySelector('.app-confirm-ok').textContent = confirmText;
+
+                    const finish = result => {
+                        document.removeEventListener('keydown', onKeyDown);
+                        overlay.remove();
+                        resolve(result);
+                    };
+                    const onKeyDown = event => {
+                        if (event.key === 'Escape') finish(false);
+                    };
+                    overlay.querySelector('.app-confirm-cancel').addEventListener('click', () => finish(false));
+                    overlay.querySelector('.app-confirm-ok').addEventListener('click', () => finish(true));
+                    overlay.addEventListener('click', event => {
+                        if (event.target === overlay) finish(false);
+                    });
+                    document.addEventListener('keydown', onKeyDown);
+                    document.body.appendChild(overlay);
+                    overlay.querySelector('.app-confirm-ok').focus();
+                });
+            }
+
+            // ---------- 删除 ----------
+            function deleteRecordByDate(dateStr) {
+                const before = dailyRecords.length;
+                dailyRecords = dailyRecords.filter(r => r.date !== dateStr);
+                if (dailyRecords.length === before) { showToast('记录不存在', 1200); return; }
+                saveToStorage();
+                renderAll();
+                showToast('🗑️ 已删除该日记录', 1500);
+            }
+            async function deleteFromModal() {
+                if (!editingDate) return;
+                const dateToDelete = editingDate;
+                if (await askConfirm(`确定删除 ${dateToDelete} 的记录吗？`, '删除记录')) {
+                    deleteRecordByDate(dateToDelete);
+                    closeManualModal();
+                }
+            }
+            async function clearAllRecords() {
+                if (dailyRecords.length === 0) { showToast('没有记录可清空', 1000); return; }
+                if (await askConfirm('确定删除全部打卡记录吗？此操作不可撤销。', '清空全部')) {
+                    dailyRecords = [];
+                    saveToStorage();
+                    renderAll();
+                    showToast('🗑️ 所有打卡记录已清空', 1500);
+                }
+            }
+
+            // ---------- 渲染 ----------
+            function renderTodayStatus() {
+                const t = getTodayDateStr();
+                const r = getRecordByDate(t);
+                const d = new Date();
+                todayDateDisplay.textContent = `${d.getMonth()+1}月${d.getDate()}日`;
+                if (r) {
+                    if (r.offDay) { todayClockIn.textContent = '—'; todayClockOut.textContent = '—'; todayOT.textContent = '0分钟'; }
+                    else {
+                        todayClockIn.textContent = formatTime(r.clockIn);
+                        todayClockOut.textContent = formatTime(r.clockOut);
+                        todayOT.textContent = getOTDisplay(r);
+                    }
+                } else { todayClockIn.textContent = '—'; todayClockOut.textContent = '—'; todayOT.textContent = '0分钟'; }
+            }
+
+            function renderMonthlyStats() {
+                const now = new Date(), cy = now.getFullYear(), cm = now.getMonth();
+                const mrs = dailyRecords.filter(r => {
+                    const d = new Date(r.date + 'T00:00:00');
+                    return d.getFullYear() === cy && d.getMonth() === cm;
+                });
+                let ot = 0, wd = 0, od = 0;
+                mrs.forEach(r => {
+                    if (r.offDay) od++;
+                    else { if (r.clockIn || r.clockOut) wd++; ot += getOTMinutes(r); }
+                });
+                monthlyTotalOT.textContent = minutesToHuman(ot);
+                workDaysCount.innerHTML = `${wd} <span class="stat-unit">天</span>`;
+                offDaysCount.innerHTML = `${od} <span class="stat-unit">天</span>`;
+            }
+
+            function renderCalendar() {
+                const y = calViewYear, m = calViewMonth;
+                const names = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+                calMonthLabel.textContent = `${y}年${names[m]}`;
+                const fd = new Date(y, m, 1).getDay();
+                const dim = new Date(y, m+1, 0).getDate();
+                const todayStr = getTodayDateStr();
+                let html = '';
+                ['日','一','二','三','四','五','六'].forEach(w => html += `<div class="cal-weekday">${w}</div>`);
+                for (let i = 0; i < fd; i++) html += `<div class="cal-day empty"></div>`;
+                let mot = 0, mwd = 0, mod = 0;
+                for (let day = 1; day <= dim; day++) {
+                    const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    const r = getRecordByDate(ds);
+                    const isToday = ds === todayStr;
+                    let cls = 'cal-day', hrs = '', offCls = '';
+                    if (isToday) cls += ' today';
+                    if (r) {
+                        if (r.offDay) { offCls = 'offday-bg'; hrs = '<span class="cal-hours zero">Off</span>'; mod++; }
+                        else {
+                            const ot = getOTMinutes(r);
+                            mot += ot;
+                            if (r.clockIn || r.clockOut) mwd++;
+                            if (ot > 0) { cls += ' has-ot'; hrs = `<span class="cal-hours">OT ${minutesToCalShort(ot)}</span>`; }
+                            else {
+                                const tm = getTotalMinutes(r);
+                                hrs = tm > 0 ? `<span class="cal-hours zero">${minutesToCalShort(tm)}</span>` : '<span class="cal-hours zero">—</span>';
+                            }
+                        }
+                    }
+                    html += `<div class="${cls} ${offCls}" data-date="${ds}"><div class="cal-day-num">${day}</div>${hrs}</div>`;
+                }
+                calendarGrid.innerHTML = html;
+                monthTotalOT.textContent = minutesToHuman(mot);
+                monthWorkDays.innerHTML = `${mwd} <span class="stat-unit">天</span>`;
+                monthOffDays.innerHTML = `${mod} <span class="stat-unit">天</span>`;
+                calendarGrid.querySelectorAll('.cal-day:not(.empty)').forEach(el => {
+                    el.addEventListener('click', () => openManualModal(el.dataset.date));
+                });
+            }
+
+            function renderLogList() {
+                renderMonthFilter();
+                logListContainer.innerHTML = '';
+                const visibleRecords = dailyRecords.filter(r => recordMonthFilterValue === 'all' || monthKey(r.date) === recordMonthFilterValue);
+                if (visibleRecords.length === 0) {
+                    logListContainer.innerHTML = '<div class="empty-log">这个月份还没有打卡记录</div>';
+                    return;
+                }
+                const groups = {};
+                visibleRecords.forEach(r => { const k=monthKey(r.date); (groups[k] ||= []).push(r); });
+                Object.keys(groups).sort().reverse().forEach(month => {
+                    const heading=document.createElement('div'); heading.className='record-month-heading'; heading.textContent=`📅 ${monthText(month)} · ${groups[month].length} 条记录`; logListContainer.appendChild(heading);
+                    groups[month].forEach(record => {
+                        const entry = document.createElement('div'); entry.className = 'log-entry';
+                        const select = document.createElement('input'); select.type='checkbox'; select.className='record-check'; select.dataset.date=record.date; select.setAttribute('aria-label',`选择 ${record.date}`);
+                        const left = document.createElement('div'); left.className = 'entry-left';
+                        const dateSpan = document.createElement('span'); dateSpan.className = 'entry-date'; dateSpan.textContent = formatDateShort(record.date);
+                        const typeSpan = document.createElement('span'); typeSpan.className = `entry-type ${record.offDay ? 'type-off' : 'type-work'}`; typeSpan.textContent = record.offDay ? 'Off Day' : '工作日';
+                        const timesDiv = document.createElement('div'); timesDiv.className = 'entry-times';
+                        if (record.offDay) timesDiv.innerHTML = '<span>休息日</span>';
+                        else {
+                            const otMins=getOTMinutes(record), totalMins=getTotalMinutes(record), inStr=formatTime(record.clockIn), outStr=formatTime(record.clockOut), isOvernight=inStr && outStr && outStr<inStr;
+                            timesDiv.innerHTML=`<span>上班 ${inStr}</span><span>下班 ${outStr}${isOvernight?' <small>(凌晨)</small>':''}</span><span>工时 ${minutesToHuman(totalMins)}</span>${otMins>0?`<span class="entry-ot">OT ${minutesToHuman(otMins)}</span>`:''}`;
+                        }
+                        left.append(dateSpan,typeSpan,timesDiv);
+                        const actions=document.createElement('div'); actions.className='entry-actions';
+                        const editBtn=document.createElement('button'); editBtn.className='edit-entry'; editBtn.type='button'; editBtn.textContent='✎'; editBtn.title='编辑记录'; editBtn.addEventListener('click',e=>{e.stopPropagation();openManualModal(record.date);});
+                        const delBtn=document.createElement('button'); delBtn.className='delete-entry'; delBtn.type='button'; delBtn.textContent='🗑️'; delBtn.title='删除这条记录'; delBtn.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();if(await askConfirm(`确定删除 ${record.date} 的打卡记录吗？`,'删除记录')) deleteRecordByDate(record.date);});
+                        actions.append(editBtn,delBtn); entry.append(select,left,actions); logListContainer.appendChild(entry);
+                    });
+                });
+            }
+
+            function renderAll() {
+                dailyRecords.sort((a, b) => (a.date < b.date ? 1 : -1));
+                renderTodayStatus();
+                renderMonthlyStats();
+                renderCalendar();
+                renderLogList();
+            }
+
+            // ---------- Tab / 日历翻页 ----------
+            function switchPage(pageId) {
+                [dayPage, monthPage, claimPage].forEach(p => p.classList.remove('active'));
+                tabs.forEach(t => t.classList.remove('active'));
+                const page = document.getElementById(pageId);
+                if (page) page.classList.add('active');
+                const tab = document.querySelector(`.view-tab[data-page="${pageId}"]`);
+                if (tab) tab.classList.add('active');
+                if (pageId === 'monthPage') renderCalendar();
+                if (pageId === 'claimPage') renderClaims();
+            }
+            function prevMonth() { if (calViewMonth === 0) { calViewMonth = 11; calViewYear--; } else calViewMonth--; renderCalendar(); }
+            function nextMonth() { if (calViewMonth === 11) { calViewMonth = 0; calViewYear++; } else calViewMonth++; renderCalendar(); }
+
+            // ---------- 导出图片 (日视图) ----------
+            function exportAsImage() {
+                if (dailyRecords.length === 0) { showToast('还没有记录可以导出哦', 1500); return; }
+                if (typeof html2canvas === 'undefined') {
+                    showToast('图片库加载失败，请刷新页面重试', 2500);
+                    return;
+                }
+                const now = new Date();
+                const names = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+                const monthLabel = `${now.getFullYear()}年${names[now.getMonth()]}`;
+                const cy = now.getFullYear(), cm = now.getMonth();
+                const mrs = dailyRecords.filter(r => {
+                    const d = new Date(r.date + 'T00:00:00');
+                    return d.getFullYear() === cy && d.getMonth() === cm;
+                });
+                let ot = 0, wd = 0, od = 0;
+                mrs.forEach(r => { if (r.offDay) od++; else { if (r.clockIn || r.clockOut) wd++; ot += getOTMinutes(r); } });
+                const recent = dailyRecords.slice(0, 10);
+                let rows = '';
+                recent.forEach(r => {
+                    const ds = formatDateShort(r.date);
+                    let typeLabel, detail;
+                    if (r.offDay) { typeLabel = 'Off Day'; detail = '休息日'; }
+                    else {
+                        typeLabel = '工作日';
+                        const otM = getOTMinutes(r);
+                        const inStr = formatTime(r.clockIn);
+                        const outStr = formatTime(r.clockOut);
+                        const isOvernight = inStr && outStr && outStr < inStr;
+                        detail = `上班 ${inStr} · 下班 ${outStr}${isOvernight ? '(凌晨)' : ''} · 工时 ${minutesToHuman(getTotalMinutes(r))}` +
+                            (otM > 0 ? ` · <strong style="color:#be185d;">OT ${minutesToHuman(otM)}</strong>` : '');
+                    }
+                    rows += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px dashed #fce7f3;">
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                            <span style="font-weight:700;color:#881337;min-width:60px;">${ds}</span>
+                            <span style="font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:${r.offDay ? '#fce7f3' : '#fce7f3'};color:${r.offDay ? '#be185d' : '#be185d'};">${typeLabel}</span>
+                            <span style="font-size:12px;color:#831843;">${detail}</span>
+                        </div>
+                    </div>`;
+                });
+                const card = `<div style="width:420px;background:linear-gradient(145deg,#fdf2f8,#ffffff);border-radius:28px;padding:28px 24px;font-family:system-ui,sans-serif;border:3px solid #fbcfe8;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <h2 style="font-size:22px;font-weight:800;color:#881337;margin:0;">🌸 We的工作记录</h2>
+                        <span style="background:#fce7f3;font-size:11px;font-weight:700;color:#be185d;padding:3px 12px;border-radius:20px;border:1px dashed #f9a8d4;">${monthLabel}</span>
+                    </div>
+                    <p style="color:#9f1239;font-size:12px;margin-bottom:18px;">每日标准8小时 · 超出计OT · 凌晨下班算前一天</p>
+                    <div style="display:flex;gap:10px;margin-bottom:18px;">
+                        <div style="flex:1;background:#fff1f2;border-radius:16px;padding:12px;text-align:center;border:1.5px solid #fbcfe8;">
+                            <div style="font-size:10px;font-weight:700;color:#be185d;">本月总OT</div>
+                            <div style="font-size:18px;font-weight:800;color:#881337;">${minutesToHuman(ot)}</div>
+                        </div>
+                        <div style="flex:1;background:#fff1f2;border-radius:16px;padding:12px;text-align:center;border:1.5px solid #fbcfe8;">
+                            <div style="font-size:10px;font-weight:700;color:#be185d;">工作日</div>
+                            <div style="font-size:18px;font-weight:800;color:#881337;">${wd} 天</div>
+                        </div>
+                        <div style="flex:1;background:#fff1f2;border-radius:16px;padding:12px;text-align:center;border:1.5px solid #fbcfe8;">
+                            <div style="font-size:10px;font-weight:700;color:#be185d;">Off Day</div>
+                            <div style="font-size:18px;font-weight:800;color:#881337;">${od} 天</div>
+                        </div>
+                    </div>
+                    <div style="background:white;border-radius:18px;padding:6px 16px;border:1.5px solid #fce7f3;">
+                        <div style="font-size:12px;font-weight:700;color:#be185d;padding:10px 0 6px;border-bottom:2px solid #fce7f3;">📋 最近记录</div>
+                        ${rows || '<div style="padding:16px 0;text-align:center;color:#f472b6;font-size:13px;">暂无记录</div>'}
+                        ${recent.length > 0 ? `<div style="padding:8px 0;text-align:center;font-size:11px;color:#f472b6;">${dailyRecords.length > 10 ? `共 ${dailyRecords.length} 条记录，仅展示最近10条` : `共 ${dailyRecords.length} 条记录`}</div>` : ''}
+                    </div>
+                    <div style="text-align:center;margin-top:16px;font-size:10px;color:#f9a8d4;">✨ 每一天的努力都值得被记录 ✨</div>
+                </div>`;
+                const container = document.getElementById('exportContainer');
+                container.innerHTML = card;
+                showToast('正在生成图片…', 800);
+                const filename = `WE工作表_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.png`;
+                downloadElementAsPng(container.firstElementChild, filename, '📸 图片已保存！');
+            }
+
+            // ---------- 导出整月OT图片 (日历视图) ----------
+            function exportMonthCalendar() {
+                if (typeof html2canvas === 'undefined') {
+                    showToast('图片库加载失败，请刷新页面重试', 2500);
+                    return;
+                }
+                const y = calViewYear, m = calViewMonth;
+                const names = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+                const monthLabel = `${y}年${names[m]}`;
+
+                // 统计当月数据
+                const mrs = dailyRecords.filter(r => {
+                    const d = new Date(r.date + 'T00:00:00');
+                    return d.getFullYear() === y && d.getMonth() === m;
+                });
+                let totalOT = 0, workDays = 0, offDays = 0;
+                mrs.forEach(r => {
+                    if (r.offDay) offDays++;
+                    else { if (r.clockIn || r.clockOut) workDays++; totalOT += getOTMinutes(r); }
+                });
+
+                // 构建日历表格
+                const fd = new Date(y, m, 1).getDay();
+                const dim = new Date(y, m+1, 0).getDate();
+                const todayStr = getTodayDateStr();
+
+                // 星期头
+                let weekdays = ['日','一','二','三','四','五','六'].map(w =>
+                    `<div style="text-align:center;font-size:10px;font-weight:700;color:#be185d;padding:4px 0;">${w}</div>`
+                ).join('');
+
+                // 天数格子
+                let dayCells = '';
+                for (let i = 0; i < fd; i++) {
+                    dayCells += `<div style="height:56px;background:transparent;border-radius:10px;border:1px solid transparent;"></div>`;
+                }
+                for (let d = 1; d <= dim; d++) {
+                    const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    const r = getRecordByDate(ds);
+                    const isToday = ds === todayStr;
+                    let bg = '#ffffff', borderColor = '#fce7f3', otText = '—', otColor = '#f9a8d4';
+                    let extraStyle = '';
+                    if (r) {
+                        if (r.offDay) {
+                            bg = '#fce7f3';
+                            borderColor = '#f9a8d4';
+                            otText = 'Off';
+                            otColor = '#db2777';
+                        } else {
+                            const ot = getOTMinutes(r);
+                            if (ot > 0) {
+                                bg = '#fff1f2';
+                                borderColor = '#fbcfe8';
+                                otText = `OT ${minutesToCalShort(ot)}`;
+                                otColor = '#be185d';
+                                extraStyle = 'border-left: 3px solid #ec4899;';
+                            } else {
+                                const tm = getTotalMinutes(r);
+                                otText = tm > 0 ? minutesToCalShort(tm) : '—';
+                                otColor = '#f9a8d4';
+                            }
+                        }
+                    }
+                    const todayStyle = isToday ? 'background:#ec4899;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;margin:0 auto;' : 'font-size:12px;font-weight:700;color:#881337;';
+                    dayCells += `<div style="height:56px;background:${bg};border-radius:10px;border:1.5px solid ${borderColor};padding:4px 2px;display:flex;flex-direction:column;align-items:center;justify-content:center;${extraStyle}">
+                        <div style="${todayStyle}">${d}</div>
+                        <div style="font-size:9px;font-weight:700;color:${otColor};margin-top:2px;white-space:nowrap;">${otText}</div>
+                    </div>`;
+                }
+
+                // 固定为 6 周 × 7 天，所有月份导出尺寸一致
+                const usedCells = fd + dim;
+                for (let i = usedCells; i < 42; i++) dayCells += `<div style="height:56px;background:transparent;border-radius:10px;border:1px solid transparent;"></div>`;
+
+                // 构建完整导出卡片
+                const card = `<div style="width:520px;background:linear-gradient(145deg,#fdf2f8,#ffffff);border-radius:28px;padding:24px 20px;font-family:system-ui,sans-serif;border:3px solid #fbcfe8;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <h2 style="font-size:20px;font-weight:800;color:#881337;margin:0;">🌸 整月OT日历</h2>
+                        <span style="background:#fce7f3;font-size:11px;font-weight:700;color:#be185d;padding:3px 12px;border-radius:20px;border:1px dashed #f9a8d4;">${monthLabel}</span>
+                    </div>
+                    <p style="color:#9f1239;font-size:11px;margin-bottom:12px;">标准8小时 · 超出计OT · 凌晨下班算前一天</p>
+                    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:24px repeat(6,56px);grid-auto-rows:56px;gap:4px;background:#fdf2f8;border-radius:16px;padding:8px;border:2px solid #fbcfe8;margin-bottom:16px;">
+                        ${weekdays}
+                        ${dayCells}
+                    </div>
+                    <div style="display:flex;gap:10px;">
+                        <div style="flex:1;background:#fff1f2;border-radius:16px;padding:12px;text-align:center;border:1.5px solid #fbcfe8;">
+                            <div style="font-size:10px;font-weight:700;color:#be185d;">总OT</div>
+                            <div style="font-size:18px;font-weight:800;color:#881337;">${minutesToHuman(totalOT)}</div>
+                        </div>
+                        <div style="flex:1;background:#fff1f2;border-radius:16px;padding:12px;text-align:center;border:1.5px solid #fbcfe8;">
+                            <div style="font-size:10px;font-weight:700;color:#be185d;">工作日</div>
+                            <div style="font-size:18px;font-weight:800;color:#881337;">${workDays} 天</div>
+                        </div>
+                        <div style="flex:1;background:#fff1f2;border-radius:16px;padding:12px;text-align:center;border:1.5px solid #fbcfe8;">
+                            <div style="font-size:10px;font-weight:700;color:#be185d;">Off Day</div>
+                            <div style="font-size:18px;font-weight:800;color:#881337;">${offDays} 天</div>
+                        </div>
+                    </div>
+                    <div style="text-align:center;margin-top:14px;font-size:10px;color:#f9a8d4;">✨ 每一天的努力都值得被记录 ✨</div>
+                </div>`;
+
+                const container = document.getElementById('exportContainer');
+                container.innerHTML = card;
+                showToast('正在生成月历图片…', 800);
+                const filename = `WE月OT_${y}${String(m+1).padStart(2,'0')}.png`;
+                downloadElementAsPng(container.firstElementChild, filename, '📸 整月OT图片已保存！');
+            }
+
+            // ---------- 记录导出：支持勾选、全部、照片与 PDF ----------
+            function selectedAttendanceRecords() {
+                const dates=[...logListContainer.querySelectorAll('.record-check:checked')].map(x=>x.dataset.date);
+                return dailyRecords.filter(r=>dates.includes(r.date));
+            }
+            function attendanceExportCard(records, title) {
+                const sorted=[...records].sort((a,b)=>a.date.localeCompare(b.date));
+                const rows=sorted.map(r=>`<tr><td>${r.date}</td><td>${r.offDay?'Off Day':'工作日'}</td><td>${r.offDay?'—':formatTime(r.clockIn)}</td><td>${r.offDay?'—':formatTime(r.clockOut)}</td><td>${r.offDay?'—':minutesToHuman(getTotalMinutes(r))}</td><td>${r.offDay?'—':minutesToHuman(getOTMinutes(r))}</td></tr>`).join('');
+                const totalOT=sorted.reduce((sum,r)=>sum+getOTMinutes(r),0);
+                return `<div style="width:900px;background:#fff5f7;color:#881337;padding:28px;border:3px solid #f9a8d4;border-radius:20px;font-family:Arial,sans-serif"><h2 style="margin:0 0 8px;color:#881337">🌸 WE工作表 · ${title}</h2><p style="margin:0 0 16px;color:#9f1239">记录数量：${sorted.length}　｜　总 OT：${minutesToHuman(totalOT)}</p><table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:#fce7f3"><th style="padding:10px;border:1px solid #f9a8d4">日期</th><th style="padding:10px;border:1px solid #f9a8d4">类型</th><th style="padding:10px;border:1px solid #f9a8d4">上班</th><th style="padding:10px;border:1px solid #f9a8d4">下班</th><th style="padding:10px;border:1px solid #f9a8d4">工时</th><th style="padding:10px;border:1px solid #f9a8d4">OT</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            }
+            function waitForImages(container) {
+                const imgs = [...container.querySelectorAll('img')];
+                return Promise.all(imgs.map(img => {
+                    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+                    return new Promise(resolve => {
+                        img.onload = resolve;
+                        img.onerror = resolve;
+                    });
+                }));
+            }
+
+            async function downloadElementAsPdf(element, filename, successMessage) {
+                if (!element || typeof html2canvas === 'undefined' || !window.jspdf || !window.jspdf.jsPDF) {
+                    showToast('PDF组件尚未加载完成，请检查网络或刷新页面后重试', 2600);
+                    return;
+                }
+                showToast('正在生成 PDF 文件…', 1500);
+                try {
+                    await waitForImages(element);
+                    const canvas = await html2canvas(element, {
+                        scale: 2,
+                        useCORS: true,
+                        allowTaint: false,
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        scrollX: 0,
+                        scrollY: 0,
+                        windowWidth: Math.max(window.innerWidth, element.scrollWidth + 40),
+                        windowHeight: Math.max(window.innerHeight, element.scrollHeight + 40),
+                        onclone: (clonedDocument) => {
+                            const clonedContainer = clonedDocument.getElementById('exportContainer');
+                            if (clonedContainer) {
+                                clonedContainer.style.position = 'fixed';
+                                clonedContainer.style.left = '0';
+                                clonedContainer.style.top = '0';
+                                clonedContainer.style.zIndex = '999999';
+                                clonedContainer.style.width = 'max-content';
+                                clonedContainer.style.opacity = '1';
+                                clonedContainer.style.transform = 'none';
+                            }
+                        }
+                    });
+
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 10;
+                    const usableWidth = pageWidth - margin * 2;
+                    const usableHeight = pageHeight - margin * 2;
+
+                    const imgWidth = usableWidth;
+                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+                    let heightLeft = imgHeight;
+                    let position = margin;
+
+                    pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
+                    heightLeft -= usableHeight;
+
+                    while (heightLeft > 0.5) {
+                        position = margin - (imgHeight - heightLeft);
+                        pdf.addPage();
+                        pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
+                        heightLeft -= usableHeight;
+                    }
+
+                    pdf.save(filename);
+                    showToast(successMessage, 2000);
+                } catch (err) {
+                    console.error('PDF导出失败：', err);
+                    showToast('生成 PDF 失败，请重试', 2500);
+                } finally {
+                    const container = document.getElementById('exportContainer');
+                    if (container) container.innerHTML = '';
+                }
+            }
+
+            async function exportAttendanceImage(records, title, filename) {
+                if(!records.length){showToast('没有可导出的记录',1600);return;}
+                const c=document.getElementById('exportContainer'); c.innerHTML=attendanceExportCard(records,title);
+                await waitForImages(c);
+                await downloadElementAsPng(c.firstElementChild,filename,'照片已导出！');
+            }
+            async function exportAttendancePdf(records, title, filename) {
+                if(!records.length){showToast('没有可导出的记录',1600);return;}
+                const c=document.getElementById('exportContainer'); c.innerHTML=attendanceExportCard(records,title);
+                await downloadElementAsPdf(c.firstElementChild, filename || `WE工作表_${title}.pdf`, '📄 PDF 文件已下载！');
+            }
+            function exportSelectedImage(){exportAttendanceImage(selectedAttendanceRecords(),'选中打卡记录',`WE_选中记录_${Date.now()}.png`);}
+            function exportSelectedPdf(){exportAttendancePdf(selectedAttendanceRecords(),'选中打卡记录',`WE_选中打卡记录_${Date.now()}.pdf`);}
+            function exportAllImage(){exportAttendanceImage(dailyRecords,'全部打卡记录',`WE_全部打卡记录.png`);}
+            function exportAllPdf(){exportAttendancePdf(dailyRecords,'全部打卡记录',`WE_全部打卡记录.pdf`);}
+
+            // ---------- Claiming ----------
+            function resetClaimForm(){claimForm.reset();editingClaimId=null;pendingClaimPhoto='';claimPreview.src='';claimPreview.style.display='none';document.getElementById('saveClaimBtn').textContent='＋ 保存 Claim';cancelClaimEditBtn.style.display='none';claimDate.value=getTodayDateStr();}
+            function claimMonthKey(date){return String(date||'').slice(0,7);}
+            function claimMonthLabel(key){
+                const [y,m]=key.split('-');
+                return `${y}年${Number(m)}月`;
+            }
+            function updateClaimMonthOptions(){
+                const current=claimMonthFilterValue;
+                const months=[...new Set(claimRecords.map(r=>claimMonthKey(r.date)).filter(Boolean))].sort().reverse();
+                claimMonthFilter.innerHTML='<option value="all">所有月份</option>'+months.map(m=>`<option value="${m}">${claimMonthLabel(m)}</option>`).join('');
+                if(current!=='all' && months.includes(current)) claimMonthFilter.value=current;
+                else {claimMonthFilter.value='all';claimMonthFilterValue='all';}
+            }
+            function visibleClaimRecords(){
+                return claimRecords.filter(r=>{
+                    const matchMonth = claimMonthFilterValue==='all'||claimMonthKey(r.date)===claimMonthFilterValue;
+                    const isClaimed = Boolean(r.claimed);
+                    const matchStatus = claimStatusFilterValue==='all' || (claimStatusFilterValue==='claimed' && isClaimed) || (claimStatusFilterValue==='unclaimed' && !isClaimed);
+                    return matchMonth && matchStatus;
+                });
+            }
+            function toggleClaimedStatus(id, checked){
+                const idx = claimRecords.findIndex(x=>x.id===id);
+                if(idx>=0){
+                    claimRecords[idx].claimed = Boolean(checked);
+                    saveClaims();
+                    renderClaims();
+                    showToast(checked ? '✅ 已标记为 Claim 到！' : '⏳ 已取消 Claim 标记', 1400);
+                }
+            }
+            function selectedClaimRecords(){
+                const ids=new Set([...claimList.querySelectorAll('.claim-record-check:checked')].map(x=>x.value));
+                return visibleClaimRecords().filter(r=>ids.has(r.id));
+            }
+            function renderClaims(){
+                updateClaimMonthOptions();
+                claimList.innerHTML='';
+                const visible=visibleClaimRecords();
+                const monthPool=claimRecords.filter(r=>claimMonthFilterValue==='all'||claimMonthKey(r.date)===claimMonthFilterValue);
+                const total=monthPool.reduce((sum,r)=>sum+(Number(r.amount)||0),0);
+                const claimedSum=monthPool.filter(r=>r.claimed).reduce((sum,r)=>sum+(Number(r.amount)||0),0);
+                const unclaimedSum=monthPool.filter(r=>!r.claimed).reduce((sum,r)=>sum+(Number(r.amount)||0),0);
+                claimTotal.textContent=`总金额：RM ${claimRecords.reduce((sum,r)=>sum+(Number(r.amount)||0),0).toFixed(2)}`;
+                claimMonthTotal.textContent=`${claimMonthFilterValue==='all'?'全部月份':claimMonthLabel(claimMonthFilterValue)}：RM ${total.toFixed(2)}`;
+                claimClaimedTotal.textContent=`✅ 已Claim：RM ${claimedSum.toFixed(2)}`;
+                claimUnclaimedTotal.textContent=`⏳ 未Claim：RM ${unclaimedSum.toFixed(2)}`;
+                if(!visible.length){claimList.innerHTML='<div class="empty-log">没有符合条件的 Claiming 记录</div>';return;}
+                const groups=new Map();
+                [...visible].sort((a,b)=>b.date.localeCompare(a.date)).forEach(r=>{
+                    const key=claimMonthKey(r.date);
+                    if(!groups.has(key)) groups.set(key,[]);
+                    groups.get(key).push(r);
+                });
+                groups.forEach((records,month)=>{
+                    const heading=document.createElement('div');
+                    heading.style.cssText='padding:.75rem 1rem;background:#efe3d6;color:#6d4c3d;font-weight:800;border-bottom:1.5px solid #dcc5b2;';
+                    heading.textContent=`📅 ${claimMonthLabel(month)} · ${records.length} 笔`;
+                    claimList.appendChild(heading);
+                    records.forEach(r=>{
+                        const isClaimed = Boolean(r.claimed);
+                        const row=document.createElement('div');row.className='claim-entry' + (isClaimed ? ' is-claimed' : '');
+                        const check=document.createElement('input');check.type='checkbox';check.className='claim-record-check';check.value=r.id;check.setAttribute('aria-label',`选择导出 ${r.date} Claim`);
+                        check.title='勾选用于导出';
+                        check.style.cssText='width:18px;height:18px;accent-color:#db2777;flex-shrink:0;margin-top:1.2rem;';
+                        const img=document.createElement('img');img.className='claim-thumb';img.alt='收据照片';img.src=r.photo||'';if(!r.photo)img.style.visibility='hidden';
+                        const meta=document.createElement('div');meta.className='claim-meta';
+                        const title=document.createElement('strong');title.textContent=`${r.date} · RM ${Number(r.amount).toFixed(2)} ${isClaimed ? '（已Claim到）' : ''}`;
+                        const purpose=document.createElement('div');purpose.textContent=`目的：${r.purpose}`;
+                        const location=document.createElement('div');location.textContent=`地点：${r.location}`;
+                        const statusBar=document.createElement('div');statusBar.className='claim-status-bar';
+                        const claimedLabel=document.createElement('label');claimedLabel.className='claimed-toggle-label' + (isClaimed ? ' is-claimed' : '');
+                        const claimedBox=document.createElement('input');claimedBox.type='checkbox';claimedBox.checked=isClaimed;
+                        claimedBox.addEventListener('change',()=>toggleClaimedStatus(r.id, claimedBox.checked));
+                        const claimedText=document.createElement('span');claimedText.textContent=isClaimed ? '✅ 已Claim到' : '⬜ 标记为已Claim到';
+                        claimedLabel.append(claimedBox, claimedText);
+                        statusBar.appendChild(claimedLabel);
+                        const actions=document.createElement('div');actions.className='claim-actions';
+                        const edit=document.createElement('button');edit.type='button';edit.textContent='编辑';edit.addEventListener('click',()=>editClaim(r.id));
+                        const del=document.createElement('button');del.type='button';del.textContent='删除';del.addEventListener('click',async()=>{if(await askConfirm(`确定删除 ${r.date} 的 Claim 记录吗？`,'删除记录')){claimRecords=claimRecords.filter(x=>x.id!==r.id);saveClaims();renderClaims();}});
+                        actions.append(edit,del);meta.append(title,purpose,location,statusBar,actions);row.append(check,img,meta);claimList.appendChild(row);
+                    });
+                });
+            }
+            function editClaim(id){
+                const r=claimRecords.find(x=>x.id===id);if(!r)return;
+                editingClaimId=id;claimDate.value=r.date;claimAmount.value=r.amount;claimPurpose.value=r.purpose;claimLocation.value=r.location;pendingClaimPhoto=r.photo||'';
+                if(pendingClaimPhoto){claimPreview.src=pendingClaimPhoto;claimPreview.style.display='block';}else{claimPreview.style.display='none';}
+                document.getElementById('saveClaimBtn').textContent='保存修改';cancelClaimEditBtn.style.display='inline-block';claimForm.scrollIntoView({behavior:'smooth',block:'start'});
+            }
+            function compressImageFile(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=reject;reader.onload=()=>{const img=new Image();img.onload=()=>{const max=1400,scale=Math.min(1,max/Math.max(img.width,img.height)),canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',0.78));};img.onerror=reject;img.src=reader.result;};reader.readAsDataURL(file);});}
+            async function saveClaim(event){
+                event.preventDefault();
+                const data={date:claimDate.value,purpose:claimPurpose.value.trim(),location:claimLocation.value.trim(),amount:Number(claimAmount.value),photo:pendingClaimPhoto};
+                if(!data.date||!data.purpose||!data.location||!Number.isFinite(data.amount)||data.amount<0){showToast('请完整填写日期、目的、地点和金额',1800);return;}
+                if(!data.photo && !editingClaimId){showToast('请上传收据或相关照片',1800);return;}
+                if(editingClaimId){const i=claimRecords.findIndex(x=>x.id===editingClaimId);if(i>=0)claimRecords[i]={...claimRecords[i],...data};}
+                else claimRecords.push({id:`claim_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,claimed:false,...data});
+                saveClaims();resetClaimForm();renderClaims();showToast('Claim 记录已保存！');
+            }
+            function buildClaimExportCard(records, title) {
+                const sorted=[...records].sort((a,b)=>a.date.localeCompare(b.date));
+                const rows=sorted.map(r=>`<div style="display:flex;gap:16px;padding:16px;border-bottom:1px solid #fbcfe8;align-items:flex-start;background:#fff;border-radius:14px;margin-bottom:10px;border:1px solid #fce7f3;">
+                    <div style="flex:1;line-height:1.6;">
+                        <div style="margin-bottom:4px;">
+                            <b style="font-size:15px;">${r.date} · RM ${Number(r.amount).toFixed(2)}</b>
+                            <span style="font-size:12px;padding:2px 8px;border-radius:12px;margin-left:6px;background:${r.claimed?'#dcfce7':'#fce7f3'};color:${r.claimed?'#15803d':'#be185d'};">${r.claimed?'✅ 已Claim到':'⏳ 未Claim'}</span>
+                        </div>
+                        <div>目的：${escapeHtml(r.purpose)}</div>
+                        <div>地点：${escapeHtml(r.location)}</div>
+                    </div>
+                    ${r.photo?`<div style="flex-shrink:0;background:#fff;padding:4px;border:1px solid #fbcfe8;border-radius:10px;display:flex;align-items:center;justify-content:center;"><img src="${r.photo}" style="display:block;max-width:220px;max-height:220px;width:auto;height:auto;object-fit:contain;border-radius:6px;"></div>`:''}
+                </div>`).join('');
+                const total=sorted.reduce((sum,r)=>sum+Number(r.amount||0),0);
+                return `<div style="width:820px;background:#fff5f7;color:#881337;padding:26px;border:3px solid #f9a8d4;border-radius:20px;font-family:Arial,sans-serif">
+                    <h2 style="margin:0 0 6px;">🌸 WE工作表 · ${escapeHtml(title)}</h2>
+                    <p style="margin:0 0 16px;color:#9f1239;font-weight:700;">记录数量：${sorted.length} 笔　｜　总金额：RM ${total.toFixed(2)}</p>
+                    ${rows}
+                </div>`;
+            }
+            async function exportClaimsImage(records=claimRecords, title='全部 Claiming 记录'){
+                if(!records.length){showToast('没有 Claiming 记录可以导出',1600);return;}
+                const c=document.getElementById('exportContainer');
+                c.innerHTML=buildClaimExportCard(records, title);
+                await waitForImages(c);
+                await downloadElementAsPng(c.firstElementChild,`WE_${title}_${Date.now()}.png`,'Claiming 照片已导出！');
+            }
+            function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+            async function exportClaimsPdf(records=claimRecords, title='全部 Claiming 记录'){
+                if(!records.length){showToast('没有 Claiming 记录可以导出',1600);return;}
+                const c=document.getElementById('exportContainer');
+                c.innerHTML=buildClaimExportCard(records, title);
+                await downloadElementAsPdf(c.firstElementChild, `WE_${title}_${Date.now()}.pdf`, '📄 Claiming PDF 文件已下载！');
+            }
+            function exportSelectedClaimsImage(){exportClaimsImage(selectedClaimRecords(),'选中 Claiming 记录');}
+            function exportSelectedClaimsPdf(){exportClaimsPdf(selectedClaimRecords(),'选中 Claiming 记录');}
+            function exportAllClaimsImage(){exportClaimsImage(claimRecords,'全部 Claiming 记录');}
+            function exportAllClaimsPdf(){exportClaimsPdf(claimRecords,'全部 Claiming 记录');}
+
+
+            // ---------- 初始化 ----------
+            function init() {
+                loadFromStorage();
+                loadClaims();
+                renderAll();
+                renderClaims();
+                resetClaimForm();
+
+                tabs.forEach(t => t.addEventListener('click', () => switchPage(t.dataset.page)));
+                clockInBtn.addEventListener('click', handleClockIn);
+                clockOutBtn.addEventListener('click', handleClockOut);
+                offdayBtn.addEventListener('click', handleOffDay);
+                manualRecordBtn.addEventListener('click', () => openManualModal());
+                clearAllBtn.addEventListener('click', clearAllRecords);
+                exportMonthBtn.addEventListener('click', exportMonthCalendar);
+                recordMonthFilter.addEventListener('change',()=>{recordMonthFilterValue=recordMonthFilter.value;renderLogList();});
+                selectAllRecordsBtn.addEventListener('click',()=>logListContainer.querySelectorAll('.record-check').forEach(x=>x.checked=true));
+                clearSelectedRecordsBtn.addEventListener('click',()=>logListContainer.querySelectorAll('.record-check').forEach(x=>x.checked=false));
+                exportSelectedImageBtn.addEventListener('click',exportSelectedImage);
+                exportSelectedPdfBtn.addEventListener('click',exportSelectedPdf);
+                exportAllImageBtn.addEventListener('click',exportAllImage);
+                exportAllPdfBtn.addEventListener('click',exportAllPdf);
+                claimForm.addEventListener('submit',saveClaim);
+                claimPhoto.addEventListener('change',async()=>{const file=claimPhoto.files&&claimPhoto.files[0];if(!file)return;try{pendingClaimPhoto=await compressImageFile(file);claimPreview.src=pendingClaimPhoto;claimPreview.style.display='block';}catch(e){showToast('照片读取失败，请换一张图片',2000);}});
+                cancelClaimEditBtn.addEventListener('click',resetClaimForm);
+                claimMonthFilter.addEventListener('change',()=>{claimMonthFilterValue=claimMonthFilter.value;renderClaims();});
+                claimStatusFilter.addEventListener('change',()=>{claimStatusFilterValue=claimStatusFilter.value;renderClaims();});
+                selectAllClaimsBtn.addEventListener('click',()=>claimList.querySelectorAll('.claim-record-check').forEach(x=>x.checked=true));
+                clearSelectedClaimsBtn.addEventListener('click',()=>claimList.querySelectorAll('.claim-record-check').forEach(x=>x.checked=false));
+                exportSelectedClaimsImageBtn.addEventListener('click',exportSelectedClaimsImage);
+                exportSelectedClaimsPdfBtn.addEventListener('click',exportSelectedClaimsPdf);
+                exportAllClaimsImageBtn.addEventListener('click',exportAllClaimsImage);
+                exportAllClaimsPdfBtn.addEventListener('click',exportAllClaimsPdf);
+                calPrevBtn.addEventListener('click', prevMonth);
+                calNextBtn.addEventListener('click', nextMonth);
+                manualCancelBtn.addEventListener('click', closeManualModal);
+                manualSaveBtn.addEventListener('click', saveManualRecord);
+                manualDeleteBtn.addEventListener('click', deleteFromModal);
+                manualModal.addEventListener('click', (e) => { if (e.target === manualModal) closeManualModal(); });
+                document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && manualModal.classList.contains('active')) closeManualModal(); });
+                manualOffDay.addEventListener('change', () => {
+                    const d = manualOffDay.checked;
+                    manualClockIn.disabled = d;
+                    manualClockOut.disabled = d;
+                    if (d) { manualClockIn.value = ''; manualClockOut.value = ''; }
+                });
+            }
+
+            window.addEventListener('DOMContentLoaded', init);
+        })();
+    </script>
+</body>
+</html>
